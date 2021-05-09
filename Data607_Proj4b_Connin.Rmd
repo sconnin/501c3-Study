@@ -1,0 +1,539 @@
+---
+title: "Data607_Proj4b_Connin"
+author: "Sean Connin"
+Date: "5/9/21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Project Overview:
+
+This project serves as the first phase in a broader study of 501c3 (tax exempt) not-for-profit organizations operating in the state of Vermont. It represents a proof-of-concept for collecting, organizing, and evaluating financial data and related metrics for these organizations. And an initial attempt to identify emergent features in their operations and leadership that, when studied in aggregate, can provide information to understand their status, distribution, resources, and collaborative potential at a regional scale. 
+
+The information that informs this research is drawn from annual financial disclosures to the IRS by the 501c3 organizations. These disclosures include FORM 990, FORM 990EZ, FORM 990N, and Form 990PF along with their respective schedules. While these are public documents, options for collating them in a systematic manner (i.e., across multiple organizations by sector, geography, range-of-time, etc.) are limited - absent a fee-for-service platform. 
+
+This report is divided into two .rmd files (a and b) and outlines steps for accessing and decomposing 501c3 disclosures via. web-based search queries and scraping techniques - in batch. It also provides initial results of exploratory data analysis using Form 990 information, focusing on cross-sector comparisons, as well as description of challenges inherent to this approach. 
+
+The bulk of data collected in this manner were identified using Propublica's Nonprofit Explorer (https://projects.propublica.org/nonprofits/) and sequentially extracted as unstructured XML pages served by Amazon Web Server. From search to analysis, the following steps are included in the report:
+
+Part a -- see project file: Data607_Proj4a_Connin
+
+1. Data identification and preliminary scraping
+2. Secondary scraping to collect XML links to 990 Forms
+3. Tertiary scaping to collect/download/convert-to-text raw 990 data 
+
+Part b
+
+4. Data processing - text analysis
+5. Initial exploratory data analysis and assessment
+6. Conclusions
+
+R packages/libraries. 
+
+```{r include=FALSE}
+library(tidyverse)
+library(janitor)
+library(httr)
+library(magrittr)
+library(stringr)
+library(rvest)
+library(xml2)
+library(XML)
+library(RCurl)
+library(stringr)
+library(glue)
+library(ggplot2)
+library(dplyr)
+library(hrbrthemes)
+library(viridis)
+library(skimr)
+library(kableExtra)
+```
+
+Establish file paths for text analysis
+
+```{r include=FALSE}
+
+#create file folder paths
+
+educ<-"./educxml"
+
+env<-"./envxml"
+
+inter<-"./internatxml"
+
+publ<-"./pubxml"
+
+relig<-"./religxml"
+
+heal<-"./hlthxml"
+
+arts<-"./artsxml"
+
+#create path to each file in folders
+
+educ_files <- educ%>% 
+    paste(., list.files(.), sep = "/")
+
+env_files <- env%>% 
+    paste(., list.files(.), sep = "/")
+
+inter_files <- inter%>% 
+    paste(., list.files(.), sep = "/")
+
+publ_files <- publ%>% 
+    paste(., list.files(.), sep = "/")
+
+relig_files <- relig%>% 
+    paste(., list.files(.), sep = "/")
+
+heal_files<-heal%>%
+  paste(.,list.files(.), sep="/")
+
+arts_files<-arts%>%
+  paste(.,list.files(.), sep="/")
+
+heal_files
+
+```
+
+## Step 4. Extract the data from individual .txt files by category. Process data for analysis.
+
+```{r}
+
+
+#Create collector dataframe for string data extracted from raw 990 text documents
+
+org_990 <- data.frame(matrix(ncol=25))
+
+colnames(org_990)<-c("xml_num","organization", "tax_year", "form", "address", "city", "website", "ein", "start_yr", "mission", "principal_officer", "employee_count", "volunteer_count", "PY_total_revenue", "PY_total_expenses", "PY_net", "CY_total_revenue", "CY_total_expenses", "CY_net", "CY_total_EOY_assets", "CY_total_EOY_liabilities", "CY_fund_balance", "CY_total_salaries", "CY_grants_contributions", "CY_program_service_rev")
+
+for(file in arts_files){
+  
+    string<-readLines(file, skipNul = TRUE)  #we only the lines that have text. Blank lines still counted.
+    
+    if(length(string)<3) next #skip files that are NA
+
+    string <- read_lines(string,skip=16,n_max = 97)  #skip lines to target select information
+    string<-glue_collapse(string, sep="\n")
+  
+  xml_num<-file%>%str_extract("\\d+")
+  organization<-string%>%str_extract("(?<=<BusinessNameLine1Txt>).+[:alnum:](?=<)")
+  tax_year<-string%>%str_extract("(?<=<TaxYr>).+[:alnum:](?=<)")
+  form<-string%>%str_extract("(?<=<ReturnTypeCd>).+[:alnum:](?=<)")
+  address<-string%>%str_extract("(?<=<AddressLine1Txt>).+[:alnum:](?=<)")
+  city<-string%>%str_extract("(?<=<CityNm>).+[:alnum:](?=<)")
+  website<-string%>%str_extract("(?<=<WebsiteAddressTxt>).+[:alnum:](?=<)")
+  ein<-string%>%str_extract("(?<=<EIN>).+[:alnum:](?=<)")
+  start_yr<-string%>%str_extract("(?<=<FormationYr>).+[:alnum:](?=<)")
+  mission<-string%>%str_extract("(?<=<MissionDesc>).+[:alnum:].(?=<)")
+  principal_officer<-string%>%str_extract("(?<=<PrincipalOfficerNm>).+[:alnum:](?=<)")
+  employee_count<-string%>%str_extract("(?<=<TotalEmployeeCnt>).+[:alnum:](?=<)")
+  volunteer_count<-string%>%str_extract("(?<=<TotalVolunteersCnt>).+[:alnum:](?=<)")
+  PY_total_revenue<-string%>%str_extract("(?<=<PYTotalRevenueAmt>).+[:alnum:](?=<)")
+  PY_total_expenses<-string%>%str_extract("(?<=<PYTotalExpensesAmt>).+[:alnum:](?=<)")
+  PY_net<-string%>%str_extract("(?<=<PYRevenuesLessExpensesAmt>).+[:alnum:](?=<)")
+  CY_total_revenue<-string%>%str_extract("(?<=<CYTotalRevenueAmt>).+[:alnum:](?=<)")
+  CY_total_expenses<-string%>%str_extract("(?<=<PYTotalExpensesAmt>).+[:alnum:](?=<)")
+  CY_net<-string%>%str_extract("(?<=<CYRevenuesLessExpensesAmt>).+[:alnum:](?=<)")
+  CY_total_EOY_assets<-string%>%str_extract("(?<=<TotalAssetsEOYAmt>).+[:alnum:](?=<)")
+  CY_total_EOY_liabilities<-string%>%str_extract("(?<=<TotalLiabilitiesEOYAmt>).+[:alnum:](?=<)")
+  CY_fund_balance<-string%>%str_extract("(?<=<NetAssetsOrFundBalancesEOYAmt>).+[:alnum:](?=<)")
+  CY_total_salaries<-string%>%str_extract("(?<=<CYSalariesCompEmpBnftPaidAmt>).+[:alnum:](?=<)")
+  CY_grants_contributions<-string%>%str_extract("(?<=<CYContributionsGrantsAmt>).+[:alnum:](?=<)")
+  CY_program_service_rev<-string%>%str_extract("(?<=<CYProgramServiceRevenueAmt>).+[:alnum:](?=<)")
+  
+  df <-data.frame(xml_num, organization, tax_year, form, address, city, website, ein, start_yr, mission, principal_officer, employee_count, volunteer_count, PY_total_revenue, PY_total_expenses, PY_net, CY_total_revenue, CY_total_expenses, CY_net, CY_total_EOY_assets, CY_total_EOY_liabilities, CY_fund_balance, CY_total_salaries, CY_grants_contributions, CY_program_service_rev)%>%trimws()
+  
+  org_990<-rbind(org_990, df)
+
+} 
+
+org_990$xml_num<-as.numeric(org_990$xml_num) # convert from char to dbl for sorting
+org_990%<>%arrange(org_990, (xml_num))
+View(org_990)
+
+#write_csv(org_990,"arts990.csv")
+
+
+```
+
+Create an aggregated dataset of 990 information.
+
+Note: for demonstrative purposes this report focuses on the 990 Form and does not include data from forms: 990EZ, 990PF, 990N. Additional scripts will be required to differentiate and parse these forms. In addition, this report only includes the Section 1 summary data from the 990's and is limited to the most recent filing year listed for each organization. Future work will focus on extracting information from other 990 sections, schedules, and reporting periods. 
+
+
+```{r include=FALSE}
+
+#set file paths
+
+educ<-"./990csvs/educ990.csv"
+env<-"./990csvs/env990.csv"
+inter<-"./990csvs/inter990.csv"
+publ<-"./990csvs/pub_ben990.csv"
+relig<-"./990csvs/relig990.csv"
+heal<-"./990csvs/health990.csv"
+arts<-"./990csvs/arts990.csv"
+
+#read files
+
+educ<-read_csv(educ)
+env<-read_csv(env)
+inter<-read_csv(publ)
+relig<-read_csv(relig)
+heal<-read_csv(heal)
+arts<-read_csv(arts)
+publ<-read_csv(publ)
+
+# add category label
+
+env$category <- "environment_animals"
+educ$category <- "education"
+inter$category <-"international_affairs"
+publ$category <- "public_societal_benefit"
+relig$category <- "religion-related"
+heal$category <- "health"
+arts$category <- "arts_culture_humanities"
+
+# create compiled df and visualize
+
+
+vtnps<- data.frame(rbind(env, educ, inter, relig, heal, arts, publ))%>%
+  relocate(category, .after=organization)
+
+
+# Count of 990 forms represented in dataset broken down by category
+
+vtnps%>%ggplot() + geom_bar(aes(x = form, fill=category), alpha=.5)+
+  scale_fill_viridis(discrete=TRUE, option="D") +
+  scale_color_viridis(discrete=TRUE, option="D") +
+  scale_x_discrete(limits = rev(levels(count)))+
+  labs( x='\n\nForm', y = 'Total Count\n', title = "Total Count of 990 Forms Represented in Dataset", subtitle="From Most Recent 501c3 Filings: Variable Years")+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+#Count of most recent 990 filings by year
+
+vtnps%>%ggplot() + geom_bar(aes(x = tax_year, fill=form), alpha=.5)+
+  scale_fill_viridis(discrete=TRUE, option="D") +
+  scale_color_viridis(discrete=TRUE, option="D") +
+  scale_x_reverse()+
+  labs( x='\n\nTax Year', y = 'Total Counts\n', title = "Most Recent 990 Filings by Year")+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+
+glue("The dimensions of this dataframe are {dim(vtnps)}.")   #1351*26
+
+```
+## Step 5. Initial data exploration and visualization. 
+
+The following code chunk highlights organization counts and start-dates by category from the mid-19th century to present. 
+
+```{r warning=FALSE}
+
+
+#create data subset for analysis and limit forms to 2019 or 2018 filing 
+
+vtnps<- data.frame(rbind(env, educ, inter, relig, heal, arts, publ))%>%
+  relocate(category, .after=organization)%>%
+  filter(form %in% "990")%>%
+  filter(tax_year==2019 | tax_year==2018)
+
+# show basic stats and df composition
+
+skim(vtnps)
+
+# glimpse dataset
+
+glimpse(vtnps)
+
+# plot history of start year with annual count -- w/o category
+
+vtnps %>%
+  ggplot(aes(x=start_yr)) +
+  geom_histogram(alpha=0.6, binwidth = 1, fill="dark blue") +
+  labs( x='\nStart Year', y = 'Total Count', title = "Development of 501c3 Non-Profits in Vermont", subtitle="Mid-19th Century to Present")+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+ 
+  theme(axis.text.x = element_text(angle = 45, hjust = 0, vjust = 1, size=10)) 
+
+#profile organization start-yr and number by category
+
+vtnps%>%
+  filter(start_yr>1850)%>%
+  count(start_yr,category) %>%
+  ggplot()+geom_col(aes(x=start_yr,y=n,fill=category))+
+  labs( x='\nStart Year', y = 'Total Count', title = "Development of 501c3 Non-Profits in Vermont", subtitle="Mid-19th Century to Present")
+
+#density of start over time
+
+ggplot(data=vtnps, aes(x=start_yr, group=category, fill=category)) +
+    geom_density(adjust=1.5, alpha=.3) +
+    labs( x='\nStart Year', y = 'Density', title = "Development of 501c3 Non-Profits in Vermont", subtitle="Mid-19th Century to Present")+
+    theme_ipsum()
+
+# annual addition of new nonprofits since 1950
+
+vtnps %>%
+  filter(start_yr>1950)%>%
+  ggplot(aes(x=start_yr, color=category, fill=category, alpha=.4)) +
+  geom_histogram(alpha=0.6, binwidth = 1) +
+  scale_fill_viridis(discrete=TRUE, option="D") +
+  scale_color_viridis(discrete=TRUE, option="D") +
+  labs( x='\nStart Year', y = 'Total Addition\n', title = "Annual Addition of 501c3 Non-Profits in Vermont", subtitle="1950 to Present")+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+ 
+
+  facet_wrap(.~category, ncol=2)
+
+#annual addition of new nonprofits since 2000
+
+vtnps %>%
+  filter(start_yr>2000)%>%
+  ggplot(aes(x=start_yr, color=category, fill=category, alpha=.4)) +
+  geom_histogram(alpha=0.6, binwidth = 1) +
+  scale_fill_viridis(discrete=TRUE, option="D") +
+  scale_color_viridis(discrete=TRUE, option="D") +
+  labs( x='\nStart Year', y = 'Total Addition\n', title = "Annual Addition of 501c3 Non-Profits in Vermont", subtitle="2000 to Present")+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+ 
+  theme(axis.text.x = element_text(angle = 45, hjust = 0, vjust = 1, size=10)) 
+  facet_wrap(~category, ncol=2)
+```
+
+The following code chunk focuses on employee count data by category
+
+```{r warning=FALSE}
+
+#summary stats for employee count
+
+ vtnps$employee_count%>%summary()
+
+# Frequency of employee counts in organization
+
+vtnps%>%
+  ggplot(aes(x=employee_count))+
+  geom_histogram(color="dark blue", fill="dark blue", alpha=.7)+
+  labs( x='\nTotal Employees in Organization', y = 'Frequency\n', title = "Employee Counts for 501c3 Non-Profits in Vermont")+
+  theme_minimal()
+
+# quantiles for total employee counts
+
+vtnps%>%group_by(category)%>%
+  group_by(category)%>%
+  mutate(category=fct_reorder(category, employee_count, .fun='median'))%>%
+  ggplot( aes(x=reorder(category, employee_count), y=employee_count)) + 
+    geom_boxplot(fill="dark blue", alpha=.3, outlier.colour = "red")+
+    coord_flip()+
+    theme_minimal()+
+    theme(axis.text.x = element_text(angle = 45, hjust= 1, size=10))
+
+# Top 20 employee counts by organization
+
+vtnps%>%
+  top_n(20, employee_count) %>%
+  ggplot(aes(x=employee_count, y=reorder(organization, employee_count), fill=category))+
+  geom_col()+
+  scale_fill_manual(values = c("#C3D7A4","#4E84C4"))+
+  labs( x='\nTotal Employees in Organization', y = 'Organization\n', title = "Top 20 Employee Counts", subtitle= "501c3 Non-Profits in Vermont")+
+  theme_minimal()
+
+# Limit analysis to organizations below 100 employees
+  
+  vtnps%>%
+  filter(employee_count<100)%>%
+  ggplot(aes(x=employee_count)) +
+  geom_boxplot()+
+  theme_minimal()
+
+#Distribution of employee counts <1000
+  
+vtnps%>%
+  filter(employee_count<1000)%>%
+  ggplot(aes(x=employee_count)) + 
+  geom_bar(colour="blue", fill="dark blue", alpha=.3)+
+  labs( x="Number of Employees", y = "Number of Organizations\n", title = "Distribution of Employee Counts", subtitle="Organizations with 1000 or Fewer Employees")+
+  theme_minimal()+
+  theme(panel.grid = element_blank())
+
+
+
+# quantiles for organizations with fewer than 1000 employees
+  
+vtnps%>%
+    group_by(category)%>%
+    filter(employee_count<1000)%>%
+    ggplot(aes(x=reorder(category, employee_count), y=employee_count))+
+    geom_boxplot(fill="dark blue", alpha=.3, outlier.colour = "red")+
+    labs( x="", y = "\n\nNumber of Employees", title = "Total Employees by 501c3 Category", subtitle="Organizations with 1000 or Fewer Employees")+
+    coord_flip()+
+    theme_minimal()+
+    theme(axis.text.x = element_text(angle = 45, hjust= 1, size=10))
+
+```
+The following code chunk focuses on salary data by category
+ 
+```{r}
+# average salary by category --> excludes salaries over 200,000
+
+vtnps%>%
+  mutate(avg_salary = CY_total_salaries/employee_count)%>%
+  filter(avg_salary<200000)%>%
+  group_by(category)%>%
+  mutate(category=fct_reorder(category, avg_salary, .fun='median'))%>%
+  ggplot( aes(x=reorder(category, avg_salary), y=avg_salary)) + 
+  geom_boxplot(fill="dark green", alpha=.3, outlier.colour = "blue")+
+   labs( x="", y = "\n\nAverage Salary", title = "Average Salaries by 501c3 Category", subtitle="Salaries less than $200,000\n\n")+
+  coord_flip()+
+  theme_minimal()+
+  theme(axis.title.y = element_blank())+
+  theme(axis.text.x = element_text(angle = 45, hjust= 1, size=10)) 
+
+
+
+
+```
+The following code chunk highights selected financial data by category
+  
+```{r}
+#Ratio of liabilities assets >1 indicates an excess of debt -- the proportion of a company’s assets that are financed by debt. A ratio greater than 1 shows that a considerable portion of debt is funded by assets. In other words, the company has more liabilities than assets. A high ratio also indicates that a company may be putting itself at risk of default on its loans if interest rates were to rise suddenly.
+
+
+vtnps%>%
+  mutate(liability_ratio = CY_total_EOY_liabilities/CY_total_EOY_assets)%>%
+  filter(liability_ratio<50)%>%  #note, one outlier at 400+
+  ggplot(aes(x=category, y=liability_ratio))+
+  geom_point(color='darkblue')+
+  coord_flip()+
+  geom_hline(yintercept = 1, color="red")+
+   labs( x="501c3 Category", y = "\n\nLiability Ratio", title = "Liability Ratios by 501c3 Category\n", subtitle="A ratio >1 indicates an excess of debt over assets\n\n")+
+  theme_minimal()+
+  theme(panel.grid = element_blank())+
+  theme(axis.title.y = element_blank())
+
+lratio<-vtnps%>%
+  mutate(liability_ratio = CY_total_EOY_liabilities/CY_total_EOY_assets)
+
+labove<-length(which(lratio$liability_ratio > 1))
+lbelow<-length(which(lratio$liability_ratio <= 1))
+(lprop<-round((labove/lbelow)*100, 0))
+
+glue("The number of organizations with a liability >1 and <=1 is {labove} and {lbelow}, respectively. The latter represents {lprop}% of the total count.")
+
+
+#Ratio of revenue to expenses between yrs. net operating ratio of income to expenses, which tells you how efficiently the organization is using its money to fund operations
+
+vtnps%>%
+  mutate(current_net=CY_total_revenue/CY_total_expenses)%>%
+  mutate(prior_net=PY_total_revenue/PY_total_expenses)%>%
+  mutate(net_annual_diff=current_net-prior_net)%>%
+  group_by(category)%>%
+  filter(current_net<100)%>%
+  ggplot(aes(x=category, net_annual_diff))+
+  geom_point()+
+  geom_hline(yintercept = 0, color="red")+
+  coord_flip()+
+  labs(x="", y= "Net Difference in Revenue:Expenses", title=("\n\nDifference in end-of-year revenue:expense"), subtitle=('Last two reporting years\n\n'))+
+  theme_minimal()+
+  theme(panel.grid = element_blank())+
+  theme(axis.title.y = element_blank())
+
+#further comparison of revenue to expense
+
+adiff<-vtnps%>%
+  mutate(current_net=CY_total_revenue/CY_total_expenses)%>%
+  mutate(prior_net=PY_total_revenue/PY_total_expenses)%>%
+  mutate(net_annual_diff=current_net-prior_net)
+
+(adiff_a<-length(which(adiff$net_annual_diff > 0)))
+(adiff_b<-length(which(adiff$net_annual_diff <= 0)))
+(adiff_r<-round((adiff_b/adiff_a)*100, 0))
+
+a_diff<-vtnps%>%
+  mutate(current_net=CY_total_revenue/CY_total_expenses)%>%
+  mutate(prior_net=PY_total_revenue/PY_total_expenses)%>%
+  mutate(net_annual_diff=current_net-prior_net)
+
+labove<-length(which(lratio$liability_ratio > 1))
+lbelow<-length(which(lratio$liability_ratio <= 1))
+(lprop<-round((labove/lbelow)*100, 0))
+
+#per capita net revenue by organization category
+
+vtnps%>%
+  mutate(net=CY_total_revenue-CY_total_expenses)%>%
+  mutate(rev_person=net/employee_count)%>%
+  group_by(category)%>%
+  filter(net<500000)%>%
+  ggplot(aes(x=reorder(category, rev_person), y=rev_person))+
+  geom_boxplot()+
+  geom_hline(yintercept = 0, color="red")+
+  coord_flip()+
+  labs(x="Per Capita Net", y= "", title=("Current Year Per Capita Net Revenue\n"), subtitle=('Organizations with Net Revenue < $500,000\n\n'))+
+  theme_minimal()+
+  theme(panel.grid = element_blank())+
+  theme(axis.title.y = element_blank())
+
+# preliminary comparison of NY revenue and employee metrics
+
+vtnps%>%
+  filter(CY_total_salaries<200000000)%>%
+  ggplot(aes(x=employee_count, y=CY_total_revenue))+
+  geom_point()+
+  theme_minimal()
+  
+
+vtnps%>%
+  filter(CY_total_salaries<200000000)%>%
+  ggplot(aes(x=CY_total_salaries, y=CY_total_revenue))+
+  geom_point()+
+  theme_minimal()
+
+```
+##Conclusions and Recommendations
+
+This project will continue with addition work focused on filling in missing information as well as constructing a data-table that holds information from multiple 990 forms and multiple years (2013 to present). The latter steps will require further scripting and automation to streamline data processing steps. It may also be advantageous to construct a relational database to facilitate data exploration and analysis. 
+
+In addition, additional scripts will be required to effectively extract key financial information from 990 forms that were not included in this initial phase. These features should include the following for 501c3 metrics:
+
+1. Liquidity - cash on hand that is not restricted 
+2. Program expenses as percentage of total expenses.
+3. Sources of unrestricted recurring dollars.
+4. Full-cost coverage.
+6. Fund-raising expenses as percentage of total contributions.
+7. Cash flow from operations.
+ 
+Other metrics include revenue reliability (across years) and revenue surplus. 
+
+### Epilogue
+
+The following chunk provides code for accessing 990 related information using Propublica's API. In this context, select data is available via. query in JSON format.
+
+
+
+url <- "https://projects.propublica.org/nonprofits/api/v2/search.json?limit=1000&q=%22vermont%22&ntee%5Bid%5D=7"
+
+res<-httr::GET(url)
+
+restxt<-httr::content(res, as = 'text')
+
+j <- fromJSON(restxt)
+
+glimpse(j)
+
+length(str(j$organizations[[1]]))
+
+
+df_json2 <- fromJSON(json2) 
+
+str(j, nest.lev)
+
+ny <- c()
+for (i in length(j)) {
+    for (x in i) {
+        print(x)
+    }
+}

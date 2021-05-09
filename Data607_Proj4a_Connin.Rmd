@@ -1,0 +1,280 @@
+---
+title: "Data607_Proj4a_Connin"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Project Overview:
+
+This project serves as the first phase in a broader study of 501c3 (tax exempt) not-for-profit organizations operating in the state of Vermont. It represents a proof-of-concept for collecting, organizing, and evaluating financial data and related metrics for these organizations. And an initial attempt to identify emergent features in their operations and leadership that, when studied in aggregate, can provide information to understand their status, distribution, resources, and collaborative potential at a regional scale. 
+
+The information that informs this research is drawn from annual financial disclosures to the IRS by the 501c3 organizations. These disclosures include FORM 990, FORM 990EZ, FORM 990N, and Form 990PF along with their respective schedules. While these are public documents, options for collating them in a systematic manner (i.e., across multiple organizations by sector, geography, range-of-time, etc.) are limited - absent a fee-for-service platform. 
+
+This report is divided into two .rmd files (a and b) and outlines steps for accessing and decomposing 501c3 disclosures via. web-based search queries and scraping techniques - in batch. It also provides initial results of exploratory data analysis using Form 990 information, focusing on cross-sector comparisons, as well as description of challenges inherent to this approach. 
+
+The bulk of data collected in this manner were identified using Propublica's Nonprofit Explorer (https://projects.propublica.org/nonprofits/) and sequentially extracted as unstructured XML pages served by Amazon Web Server. From search to analysis, the following steps are included in the report:
+
+Part a
+
+1. Data identification and preliminary scraping
+2. Secondary scraping to collect XML links to 990 Forms
+3. Tertiary scaping to collect/download/convert-to-text raw 990 data 
+
+Part b
+
+4. Data processing - text analysis
+5. Initial exploratory data analysis and assessment
+6. Conclusions
+
+R packages/libraries. 
+
+```{r}
+
+library(tidyverse)
+library(janitor)
+library(httr)
+library(magrittr)
+library(stringr)
+library(rvest)
+library(xml2)
+library(XML)
+library(RCurl)
+library(stringr)
+library(glue)
+library(ggplot2)
+library(dplyr)
+library(hrbrthemes)
+library(viridis)
+library(skimr)
+library(kableExtra)
+
+
+```
+## Step 1. Data identification.
+
+Propublica's NonProfit Explorer is a web-based query tool to identify nonprofit organizations by state, category, type, and/or name. A search for Vermont-based 501c3 organizations returned 5,329 results across 54 web-pages. Each page consisted of ~30 url links to subsidiary pages for individual nonprofits. In turn, each of the latter contained 0-to-multiple links to raw 990 data (unstructured XML) covering tax years 2013-present. 
+
+The following code block draws on first-order Propublica search queries (by org. category) to collect the url locations of subsidiary web-pages containing organizational listings. 
+
+Note: the availability of 990 data across pages (organizations) was highly heterogenous and often absent. The latter reflects, in part, the disparate nature in which 990 information is hosted on AWS as well as variations in the operational status of individual nonprofits over time. 
+
+The discrepencies and challenges associated with IRS's release of 990 Form data are described, in part, in a 2018 article by David Borenstein: 
+
+https://medium.com/@borenstein/the-irs-990-e-file-dataset-getting-to-the-chocolatey-center-of-data-deliciousness-90f66097a600
+
+
+```{r}
+
+# Example results of VT 501c3 search by category
+
+#arts and culture --> https://projects.propublica.org/nonprofits/search?adv_search=1&c_code%5Bid%5D=3&city=&ntee%5Bid%5D=1&page=2&q_all=&q_any=&q_none=&q_phrase=&state%5Bid%5D=VT
+
+# Public Benefit --> https://projects.propublica.org/nonprofits/search?adv_search=1&c_code%5Bid%5D=3&city=&ntee%5Bid%5D=7&page=",page_result,"&q_all=&q_any=&q_none=&q_phrase=&state%5Bid%5D=VT
+
+#Environment and Animals --> https://projects.propublica.org/nonprofits/search?adv_search=1&c_code%5Bid%5D=3&city=&ntee%5Bid%5D=3&page=2&q_all=&q_any=&q_none=&q_phrase=&state%5Bid%5D=VT
+
+#Education --> https://projects.propublica.org/nonprofits/search?adv_search=1&c_code%5Bid%5D=3&city=&ntee%5Bid%5D=2&page=2&q_all=&q_any=&q_none=&q_phrase=&state%5Bid%5D=VT
+
+#International -->https://projects.propublica.org/nonprofits/search?utf8=%E2%9C%93&adv_search=1&state%5Bid%5D=VT&ntee%5Bid%5D=6&c_code%5Bid%5D=3&q_all=&q_phrase=&q_any=&q_none=&city=
+
+#human services --> https://projects.propublica.org/nonprofits/search?adv_search=1&c_code%5Bid%5D=3&city=&ntee%5Bid%5D=5&page=2&q_all=&q_any=&q_none=&q_phrase=&state%5Bid%5D=VT
+
+#Religion --> https://projects.propublica.org/nonprofits/search?adv_search=1&c_code%5Bid%5D=3&city=&ntee%5Bid%5D=8&page=2&q_all=&q_any=&q_none=&q_phrase=&state%5Bid%5D=VT
+
+#Health --> https://projects.propublica.org/nonprofits/search?adv_search=1&c_code%5Bid%5D=3&city=&ntee%5Bid%5D=4&page=2&q_all=&q_any=&q_none=&q_phrase=&state%5Bid%5D=VT
+
+
+# Establish a collector and perform initial scrape of listings
+
+df = data.frame()
+
+
+for(page_result in seq(from=1, to=4)){
+    
+    
+link = paste0("https://projects.propublica.org/nonprofits/search?adv_search=1&c_code%5Bid%5D=3&city=&ntee%5Bid%5D=4&page=",page_result,"&q_all=&q_any=&q_none=&q_phrase=&state%5Bid%5D=VT")
+    
+    
+    page=read_html(link)
+    
+    Sys.sleep(20) # pause required to avoid captchas and related lockout 
+    
+    table=page%>%html_nodes("table#search-results")%>%html_table()%>%.[[1]] #html_table returns tbl data in list form. .[[1]] extracts the list.
+    
+    table<-data_frame(table)
+    
+    # get urls from table
+    
+    url_link <- page%>%html_nodes(xpath="//td/a")%>%html_attr("href")
+    
+    Sys.sleep(20)
+    
+    child_url<-paste0("https://projects.propublica.org",url_link)
+        
+    url_df <-data_frame(child_url)
+    
+    table<-cbind(table, url_df)
+    
+    df<-rbind(df, table)
+
+}
+
+#write initial results to csv on local directory. 
+
+write_csv(df, "filename")
+
+
+
+```
+ Create a csv that combines and processes the initial cross-category scraping results 
+
+```{r}
+list.files()
+
+#read in the set of .csv files from propublica web-scraping
+
+raw <- list.files(pattern="*.csv")
+
+for (i in 1:length(raw)){
+    assign(raw[i], read.csv(raw[i]))}
+
+#Loop through, read, and combine files into combined dataframe
+
+combined<-data.frame()
+for (i in 1:length(raw)){
+    t<-assign(raw[i], read.csv(raw[i]))
+  combined<-rbind(combined, t)
+  }
+head(combined, 3)
+
+#Initial data processing 
+
+combined%<>%
+    clean_names() %>% # cleans df columns
+    separate(location, c("city", "state"), sep=",")%>%
+    separate("ntee_classification", c("description", "sub_desc"),
+    sep="â†³")%>%
+  mutate(ein = str_extract(child_url, pattern="[0-9]+"))
+
+# write to csv
+
+write_csv(combined, "combined.csv")
+    
+
+
+```
+## Step 2. Iterate through csv files and scrape to collect xml url links for 990 data.
+
+```{r}
+
+#The set of csv files and categories 
+
+env<-read_csv("vt_env_animals.csv")
+arts<-read_csv("vt_arts_culture.csv")
+reg<-read_csv("vt_religion.csv")
+inter<-read_csv("vt_international.csv")
+hlth<-read_csv("vt_health.csv")
+educ<-read_csv("vt_education.csv")
+hserv<-read_csv("vt_humanservices.csv")
+publ<-read_csv("vt_public_benefit.csv")
+
+
+# Using arts as an example - process data for iteration
+
+arts<-arts%>%
+    clean_names() %>% # cleans df columns
+    separate(location, c("city", "state"), sep=",")%>%
+    separate("ntee_classification", c("description", "sub_desc"),
+    sep="↳")%>%
+    mutate(ein = str_extract(child_url, pattern="[0-9]+"))
+
+
+a<-arts%>%
+  select(child_url)%>%
+  as.list%>%
+  unlist(use.names = FALSE)
+
+#create loop to collect xml urls and pass into a dataframe
+
+xl<-data.frame(matrix(NA, ncol=12))
+
+for(i in 1:length(a)){
+ page=read_html(a[i])
+ Sys.sleep(10)
+ url <- page%>%html_nodes("[class='action xml']")
+ pg <- paste(as.character(url))
+ if(identical(pg, character(0))){pg <- "NA"}
+ print(pg)
+ xl<-rbind(xl, pg)
+}
+
+#process dataframe and bind to parent csv
+
+xml<-xl[-1,] #remove first row
+xml%<>%mutate(across(.cols = X1:X12, .fns =str_extract, pattern = 'http.+xml')) # extract the xml urls, note I removed quotes
+
+tmp<-cbind(arts, xml)
+
+#Write csv to local directory
+
+write_csv(tmp,"artsxml.csv")
+  
+
+
+```
+## Step 3. Scraping to access & collect 990 raw data (individual organizations) then save to .txt on local directory.
+
+Results from this step included a mix of 990 forms and filing years. 
+```{r}
+
+
+#open dataframe with xml links and convert to iterable character form
+
+x990<-read_csv("artsxml.csv")
+
+x990%>% mutate(X1 = str_squish(X1))
+df<-x990
+vect<-unlist(list(df$X1))
+
+#Create an iterable vector of urls 
+
+xls<-c()
+for(i in 1:length(vect)){
+  d<-gsub('\"', "", vect[i])
+  xls<-c(xls,d)
+}
+
+# create a dataframe collector and xml scraping routine
+
+data<-NULL  #set up dataframe
+
+for(i in 1:length(xls)){
+  url<-(xls[i]) 
+  if(is.na(url)){
+    x<-"NA"
+    } else {
+      x <- getURL(url)
+      Sys.sleep(3)
+      }
+  x<-as.data.frame(x)
+  data<-rbind(data, x)
+}
+
+identical(data[3,],data[4,])
+
+
+#Save scraping results as text files (for each organization) on local directory
+
+vt990<-data%>%
+  mutate(id=row_number())%>%
+  rename(xml_file=x)
+
+for(i in 1:nrow(vt990)){
+  write(vt990$xml_file[i], paste0(vt990$id[i],  ".txt"))
+  
+}
+  
+```
