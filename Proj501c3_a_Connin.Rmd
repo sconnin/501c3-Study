@@ -1,5 +1,5 @@
 ---
-title: "Data607_Proj4a_Connin"
+title: "Proj501c3_a_Connin"
 output: html_document
 ---
 
@@ -27,7 +27,7 @@ Part b
 
 4. Data processing - text analysis
 5. Initial exploratory data analysis and assessment
-6. Conclusions
+
 
 R packages/libraries. 
 
